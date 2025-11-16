@@ -15,31 +15,18 @@ import argparse
 import numpy as np
 import os
 import torch
+import cv2
 
 from video_depth_anything.video_depth import VideoDepthAnything
 from utils.dc_utils import read_video_frames, save_video
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Video Depth Anything')
-    parser.add_argument('--input_video', type=str, default='./assets/example_videos/davis_rollercoaster.mp4')
-    parser.add_argument('--output_dir', type=str, default='./outputs')
-    parser.add_argument('--input_size', type=int, default=518)
-    parser.add_argument('--max_res', type=int, default=1280)
-    parser.add_argument('--encoder', type=str, default='vitl', choices=['vits', 'vitb', 'vitl'])
-    parser.add_argument('--max_len', type=int, default=-1, help='maximum length of the input video, -1 means no limit')
-    parser.add_argument('--target_fps', type=int, default=-1, help='target fps of the input video, -1 means the original fps')
-    parser.add_argument('--metric', action='store_true', help='use metric model')
-    parser.add_argument('--fp32', action='store_true', help='model infer with torch.float32, default is torch.float16')
-    parser.add_argument('--grayscale', action='store_true', help='do not apply colorful palette')
-    parser.add_argument('--save_npz', action='store_true', help='save depths as npz')
-    parser.add_argument('--save_exr', action='store_true', help='save depths as exr')
-    parser.add_argument('--focal-length-x', default=470.4, type=float,
-                        help='Focal length along the x-axis.')
-    parser.add_argument('--focal-length-y', default=470.4, type=float,
-                        help='Focal length along the y-axis.')
+from vine_prune.utils.run import run_with_log
 
-    args = parser.parse_args()
+def format_int(ind):
+    return "{:0>6d}".format(ind)
 
+def main(args):
+    
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     model_configs = {
@@ -61,8 +48,29 @@ if __name__ == '__main__':
 
     processed_video_path = os.path.join(args.output_dir, os.path.splitext(video_name)[0]+'_src.mp4')
     depth_vis_path = os.path.join(args.output_dir, os.path.splitext(video_name)[0]+'_vis.mp4')
-    save_video(frames, processed_video_path, fps=fps)
-    save_video(depths, depth_vis_path, fps=fps, is_depths=True, grayscale=args.grayscale)
+    
+    if not args.save_img:
+        save_video(frames, processed_video_path, fps=fps)
+        save_video(depths, depth_vis_path, fps=fps, is_depths=True, grayscale=args.grayscale)
+    else:
+        assert args.downsample is not None
+        assert args.resize_fac is not None
+        for ind, depth in enumerate(depths):
+            if not (ind % args.downsample == 0):
+                continue
+
+            depth = (depth - depth.min()) / (depth.max() - depth.min()) * 255.0
+            depth = depth.astype(np.uint8)
+
+            new_height = depth.shape[0] // args.resize_fac
+            new_width = depth.shape[1] // args.resize_fac
+            depth = cv2.resize(depth, (new_width, new_height), interpolation=cv2.INTER_NEAREST)
+
+            depth = np.repeat(depth[..., np.newaxis], 3, axis=-1)
+
+            filename = f'{format_int(ind // args.downsample)}.png'
+
+            cv2.imwrite(os.path.join(args.output_dir, os.path.splitext(os.path.basename(filename))[0] + '.png'), depth)
 
     if args.save_npz:
         depth_npz_path = os.path.join(args.output_dir, os.path.splitext(video_name)[0]+'_depths.npz')
@@ -99,3 +107,33 @@ if __name__ == '__main__':
             pcd.points = o3d.utility.Vector3dVector(points)
             pcd.colors = o3d.utility.Vector3dVector(colors)
             o3d.io.write_point_cloud(os.path.join(args.output_dir, 'point' + str(i).zfill(4) + '.ply'), pcd)
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='Video Depth Anything')
+    parser.add_argument('--input_video', type=str, default='./assets/example_videos/davis_rollercoaster.mp4')
+    parser.add_argument('--output_dir', type=str, default='./outputs')
+    parser.add_argument('--input_size', type=int, default=518)
+    parser.add_argument('--max_res', type=int, default=-1)
+    parser.add_argument('--encoder', type=str, default='vitl', choices=['vits', 'vitb', 'vitl'])
+    parser.add_argument('--max_len', type=int, default=-1, help='maximum length of the input video, -1 means no limit')
+    parser.add_argument('--target_fps', type=int, default=-1, help='target fps of the input video, -1 means the original fps')
+    parser.add_argument('--metric', action='store_true', help='use metric model')
+    parser.add_argument('--fp32', action='store_true', help='model infer with torch.float32, default is torch.float16')
+    parser.add_argument('--grayscale', action='store_true', help='do not apply colorful palette')
+    parser.add_argument('--save_npz', action='store_true', help='save depths as npz')
+    parser.add_argument('--save_exr', action='store_true', help='save depths as exr')
+    parser.add_argument('--focal-length-x', default=470.4, type=float,
+                        help='Focal length along the x-axis.')
+    parser.add_argument('--focal-length-y', default=470.4, type=float,
+                        help='Focal length along the y-axis.')
+    parser.add_argument('--save_img', action='store_true')
+    parser.add_argument('--downsample', type=int, default=None)
+    parser.add_argument('--resize_fac', type=int, default=None)
+
+    args = parser.parse_args()
+
+    return args
+
+if __name__ == "__main__":
+    args = parse_args()
+    run_with_log(main, args, 'vda', os.path.dirname(args.input_video))
