@@ -16,7 +16,7 @@ except:
 def ensure_even(value):
     return value if value % 2 == 0 else value + 1
 
-def read_video_frames(video_path, process_length, target_fps=-1, max_res=-1):
+def read_video_frames(video_path, process_length, target_fps=-1, max_res=-1, resize_fac=None):
     if DECORD_AVAILABLE:
         vid = VideoReader(video_path, ctx=cpu(0))
         original_height, original_width = vid.get_batch([0]).shape[1:3]
@@ -24,6 +24,10 @@ def read_video_frames(video_path, process_length, target_fps=-1, max_res=-1):
         width = original_width
         if max_res > 0 and max(height, width) > max_res:
             scale = max_res / max(original_height, original_width)
+            height = ensure_even(round(original_height * scale))
+            width = ensure_even(round(original_width * scale))
+        elif resize_fac is not None:
+            scale = 1/resize_fac
             height = ensure_even(round(original_height * scale))
             width = ensure_even(round(original_width * scale))
 

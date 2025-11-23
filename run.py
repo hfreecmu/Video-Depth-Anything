@@ -40,7 +40,7 @@ def main(args):
     video_depth_anything.load_state_dict(torch.load(f'./checkpoints/{checkpoint_name}_{args.encoder}.pth', map_location='cpu'), strict=True)
     video_depth_anything = video_depth_anything.to(DEVICE).eval()
 
-    frames, target_fps = read_video_frames(args.input_video, args.max_len, args.target_fps, args.max_res)
+    frames, target_fps = read_video_frames(args.input_video, args.max_len, args.target_fps, args.max_res, args.resize_fac)
     depths, fps = video_depth_anything.infer_video_depth(frames, target_fps, input_size=args.input_size, device=DEVICE, fp32=args.fp32)
 
     video_name = os.path.basename(args.input_video)
@@ -59,12 +59,15 @@ def main(args):
             if not (ind % args.downsample == 0):
                 continue
 
+            # new_height = depth.shape[0] // args.resize_fac
+            # new_width = depth.shape[1] // args.resize_fac
+            # depth = cv2.resize(depth, (new_width, new_height))
+
             depth = (depth - depth.min()) / (depth.max() - depth.min()) * 255.0
             depth = depth.astype(np.uint8)
 
-            new_height = depth.shape[0] // args.resize_fac
-            new_width = depth.shape[1] // args.resize_fac
-            depth = cv2.resize(depth, (new_width, new_height), interpolation=cv2.INTER_NEAREST)
+            # depth = cv2.resize(depth, (new_width, new_height), interpolation=cv2.INTER_NEAREST)
+            # depth = cv2.resize(depth, (new_width, new_height))
 
             depth = np.repeat(depth[..., np.newaxis], 3, axis=-1)
 
